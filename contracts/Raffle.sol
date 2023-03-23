@@ -12,10 +12,27 @@ pragma solidity^0.8.7;
 
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
+import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 
 error Raffle__NotEnoughETHEntered();
+error Raffle__TransferFailed();
+error Raffle__NotOpen();
+error Raffle__UpkeepNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 raffleState);
 
-contract Raffle is VRFConsumerBaseV2 {
+/**
+ * @title A sample Lottery Contract
+ * @author 0xREALaldc
+ * @notice This contract is for creating an umtamperable decentralized smart contract
+ * @dev This implements Chainlink VRF and Chainlink Automation
+ * 
+ */
+contract Raffle is VRFConsumerBaseV2, AutomationCompatibleInterface {
+  /* Type declarations */
+  enum RaffleState {
+    OPEN,
+    CALCULATING
+  }
+
   /* State Variables */
   uint256 private immutable i_entranceFee;
   address payable[] private s_players;
@@ -25,17 +42,27 @@ contract Raffle is VRFConsumerBaseV2 {
   uint32 private immutable i_callbackGasLimit;
   //using the syntax for constant variables
   uint16 private constant REQUEST_CONFIRMATIONS = 3; 
-  uint21 private constant NUM_WORDS = 1;
+  uint32 private constant NUM_WORDS = 1;
+
+  // Lottery Variables
+  address private s_recentWinner;
+  RaffleState private s_raffleState;
+  uint256 private s_lastTimeStamp;
+  uint256 private immutable i_interval;
 
   /* Events */
   event RaffleEnter(address indexed player);
+  event RequestedRaffleWinner(uint256 indexed requestId);
+  event WinnerPicked(address indexed winner);
 
+  /* Functions */
   constructor(
     address vrfCoordinatorV2, 
     uint256 entranceFee,
     bytes32 keyHash,
     uint64 subscriptionId,
-    uint32 callbackGasLimit
+    uint32 callbackGasLimit,
+    uint256 interval
     ) VRFConsumerBaseV2(vrfCoordinatorV2) {
     i_entranceFee = entranceFee;
     
@@ -50,11 +77,17 @@ contract Raffle is VRFConsumerBaseV2 {
 
     // gas limit that our call can use
     i_callbackGasLimit = callbackGasLimit;
+    s_raffleState = RaffleState.OPEN;
+    s_lastTimeStamp = block.timestamp;
+    i_interval = interval;
   }
 
   function enterRaffle() public payable{
-    if(msg.value < i_entranceFee) { 
+    if (msg.value < i_entranceFee) { 
       revert Raffle__NotEnoughETHEntered(); 
+    }
+    if (s_raffleState != RaffleState.OPEN) {
+      revert Raffle__NotOpen();
     }
 
     // since 'msg.sender' isn't payable by default, we need to use a typecast
@@ -63,22 +96,88 @@ contract Raffle is VRFConsumerBaseV2 {
     emit RaffleEnter(msg.sender);
   }
 
+  /**
+   * @dev This is the function that the Chainlink Automation nodes call
+   * they look for the `upkeepNeeded` to return true.
+   * The following should be true in order to return true:
+   * 1. Our time interval should have passed 
+   * 2. The lottery should have at least 1 player, and have some ETH
+   * 3. Our subscription is funded with LINK
+   * 4. The lottery should be in an "open" state 
+   */
+  function checkUpkeep(
+    bytes calldata /*checkData */
+  ) 
+    public 
+    view 
+    override 
+    returns(bool upkeepNeeded, bytes memory/* performData */)
+  {
+    bool isOpen = (s_raffleState == RaffleState.OPEN);
+    bool timePassed = ((block.timestamp - s_lastTimeStamp) > i_interval);
+    bool hasPlayers = (s_players.length > 0);
+    bool hasBalance = (address(this).balance > 0);
+    
+    upkeepNeeded = (isOpen && timePassed && hasPlayers && hasBalance);
+  }
+
   // 'external' functions are a little cheaper compared to 'public' ones, because the blockchain knows our own contract won't be able to call it
-  function requestRandomWinner() external {
+  function performUpkeep(
+    bytes calldata /*performData */
+  ) 
+    external 
+    override 
+  {
+    (bool upkeepNeeded, ) = checkUpkeep("");
+    if (!upkeepNeeded) {
+      revert Raffle__UpkeepNotNeeded(
+        address(this).balance, 
+        s_players.length, 
+        uint256(s_raffleState)
+      );
+    }
+
+    // first we CLOSE the lottery
+    s_raffleState = RaffleState.CALCULATING;
+
     // Request the random number
     // Once we get it, do something with it
     // Chainlink VRF is a 2 transaction process
-    i_vrfCoordinator.requestRandomWords(
+    uint256 requestId = i_vrfCoordinator.requestRandomWords(
       i_keyHash, //gasLane
       i_subscriptionId, 
       REQUEST_CONFIRMATIONS,
       i_callbackGasLimit,
       NUM_WORDS
     );
+    emit RequestedRaffleWinner(requestId);
   }
 
-  function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+  // when you need to pass a parameter but will not use it, we can only pass the type of it and omit the name of the variable
+  function fulfillRandomWords(
+    uint256 /* requestId */, 
+    uint256[] memory randomWords
+  ) 
+    internal override 
+  {
+    uint256 indexOfWinner = randomWords[0] % s_players.length;
+    // address payable recentWinner = s_players[indexOfWinner];
+    s_recentWinner = s_players[indexOfWinner];
 
+    // Reopen the lottery
+    s_raffleState = RaffleState.OPEN;
+
+    // Reset the s_players array 
+    s_players = new address payable[](0);
+
+    // Reset the timestamp 
+    s_lastTimeStamp = block.timestamp;
+
+    (bool sucess, ) = s_recentWinner.call{value: address(this).balance}("");
+    if (!sucess) {
+      revert Raffle__TransferFailed();
+    }
+    emit WinnerPicked(s_recentWinner);
   }
   
   /* View / Pure functions */
@@ -90,5 +189,15 @@ contract Raffle is VRFConsumerBaseV2 {
   //let others know who is in the lottery taking a chance
   function getPlayer(uint256 index) public view returns(address) {
     return s_players[index];
+  }
+
+  // Who's the recent winner of the lottery
+  function getRecentWinner() public view returns (address) {
+    return s_recentWinner;
+  }
+
+  // Raffle state
+  function getRaffleState() public view returns (Rafflestate) {
+    return s_raffleState;
   }
 }
