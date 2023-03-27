@@ -57,7 +57,7 @@ contract Raffle is VRFConsumerBaseV2, AutomationCompatibleInterface {
 
   /* Functions */
   constructor(
-    address vrfCoordinatorV2, 
+    address vrfCoordinatorV2, // contract
     uint256 entranceFee,
     bytes32 keyHash,
     uint64 subscriptionId,
@@ -106,7 +106,7 @@ contract Raffle is VRFConsumerBaseV2, AutomationCompatibleInterface {
    * 4. The lottery should be in an "open" state 
    */
   function checkUpkeep(
-    bytes calldata /*checkData */
+    bytes memory /*checkData */
   ) 
     public 
     view 
@@ -197,7 +197,30 @@ contract Raffle is VRFConsumerBaseV2, AutomationCompatibleInterface {
   }
 
   // Raffle state
-  function getRaffleState() public view returns (Rafflestate) {
+  function getRaffleState() public view returns (RaffleState) {
     return s_raffleState;
   }
+
+  // Num words got from Chainlink VRF
+  // And since NUM_WORDS is a constant and it's not in STORAGE and lives in the bytecode of the contract, this function can be a PURE function
+  function getNumWords() public pure returns (uint256) {
+    return NUM_WORDS;
+  }
+
+  // number of players
+  function getNumberOfPlayers() public view returns (uint256) {
+    return s_players.length;
+  }
+
+  // latest timestamp
+  function getLatestTimeStamp() public view returns (uint256) {
+    return s_lastTimeStamp;
+  }
+
+  // How many Request confirmations 
+  // And since REQUEST_CONFIRMATIONS is a constant and it's not in STORAGE and lives in the bytecode of the contract, this function can be a PURE function
+  function getRequestConfirmations() public pure returns (uint256) {
+    return REQUEST_CONFIRMATIONS;
+  }
+   
 }
