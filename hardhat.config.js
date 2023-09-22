@@ -1,6 +1,6 @@
 require("@nomiclabs/hardhat-waffle")
 require("@nomiclabs/hardhat-etherscan")
-require("hardhat-deploy")
+require("hardhat-deploy")    
 require("solidity-coverage")
 require("hardhat-gas-reporter")
 require("hardhat-contract-sizer")
@@ -25,6 +25,13 @@ module.exports = {
       accounts: [PRIVATE_KEY],
     }
   },
+  gasReporter: {
+    enabled: true,
+    outputFile: "gas-report.txt",
+    noColors: true, // this is because when output to a file, it get's all mess up
+    currency: "USD", // we can get the cost for each function in USD 
+    coinmarketcap: COINMARKETCAP_API_KEY,
+  },
   solidity: "0.8.7",  
   etherscan: {
     apiKey: ETHERSCAN_API_KEY,
@@ -36,5 +43,8 @@ module.exports = {
     player: {
       default: 1,
     },
+  },
+  mocha: {
+    timeout: 300000, // 300 seconds
   },
 };

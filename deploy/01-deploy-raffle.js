@@ -1,17 +1,17 @@
-const { network } = require("hardhat")
+const { network, ethers } = require("hardhat")
 const { developmentChains, networkConfig } = require("../helper-hardhat-config")
 const { verify } = require("../utils/verify")
 
-const VRF_SUB_FUND_AMOUNT = ethers.parseEther("30")
+const VRF_SUB_FUND_AMOUNT = ethers.utils.parseEther("1")
 
 module.exports = async function ({ getNamedAccounts, deployments }) {
   const { deploy, log } = deployments
   const { deployer } = await getNamedAccounts()
   const chainId = network.config.chainId
-  let vrfCoordinatorV2Address, subscriptionId
+  let vrfCoordinatorV2Address, subscriptionId, VRFCoordinatorV2Mock
 
   if (developmentChains.includes(network.name)) {
-    const VRFCoordinatorV2Mock = await ethers.getContract("VRFCoordinatorV2Mock")
+    VRFCoordinatorV2Mock = await ethers.getContract("VRFCoordinatorV2Mock")
     vrfCoordinatorV2Address = VRFCoordinatorV2Mock.address
 
     //creating a subscriptionID programmatically
@@ -39,6 +39,13 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     log: true,
     waitConfirmations: network.config.blockConfirmations || 1,
   })
+  
+  if (developmentChains.includes(network.name)) {
+    await VRFCoordinatorV2Mock.addConsumer(
+      subscriptionId, 
+      raffle.address
+    );
+  }
 
   if (!developmentChains.includes(network.name) && process.env.ETHERSCAN_API_KEY) {
     log("Verifying...")
